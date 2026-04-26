@@ -747,10 +747,17 @@ runner
   runner:
     only_eval: False
     max_prompt_length: 30
+    overlap_env_bootstrap: False
 
 ``runner.only_eval``：只运行评估，不进行训练。  
 
 ``runner.max_prompt_length``：最大提示长度（token 数）。
+
+``runner.overlap_env_bootstrap``： 
+将环境的 bootstrap（重置/reset）过程与 Actor 训练过程重叠，以隐藏重置延迟。 
+当环境重置较慢时，此功能非常有用。 
+**注意：** 仅在 ``env.enable_offload`` 为 False 时生效。 
+如果环境和 Actor 共享同一个加速器，开启此功能可能会增加重合期间的 GPU 显存压力。
 
 algorithm
 ~~~~~~~~~~~~~~~

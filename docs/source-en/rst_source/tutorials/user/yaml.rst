@@ -802,10 +802,17 @@ runner
   runner:
     only_eval: False
     max_prompt_length: 30
+    overlap_env_bootstrap: False
 
 ``runner.only_eval``: Run evaluation only without training.
 
 ``runner.max_prompt_length``: Maximum prompt length in tokens.
+
+``runner.overlap_env_bootstrap``: 
+Overlap environment bootstrap (reset) with actor training to hide reset latency. 
+This is particularly useful when environment reset is slow. 
+**Note:** This is only effective when ``env.enable_offload`` is False. 
+Enabling this may increase GPU memory pressure if the environment and actor share the same accelerator.
 
 algorithm
 ~~~~~~~~~~~~~~~
