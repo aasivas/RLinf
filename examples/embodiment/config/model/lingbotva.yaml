@@ -1,0 +1,27 @@
+model_type: "lingbotva"
+
+# Model paths
+model_path: "/path/to/lingbot_va_model"
+tokenizer_path: "/path/to/model/Qwen2.5-VL-3B-Instruct"
+
+# Architecture parameters
+action_dim: 14
+use_proprio: True
+proprio_dim: 14
+max_prompt_length: 512
+
+# Diffusion parameters
+num_steps: 10              # Number of denoising steps
+noise_method: "flow_sde"   # flow_ode, flow_sde, or flow_noise
+noise_level: 0.7           # Noise intensity for flow_sde
+
+# RL Training parameters
+rl_trainable_scope: "all"  # "all" or "action_expert"
+add_value_head: False      # Set to True for PPO (actor-critic)
+value_type: "action"       # "action" or "token" level value prediction
+
+# Lingbot-VA specific parameters
+lingbotva:
+  config_path: "/path/to/lingbot-va-base"
+  use_video_imagination: True
+  temporal_ensemble: True
