@@ -108,6 +108,22 @@ class LiberoEnv(gym.Env):
         self.task_suite: Benchmark = get_benchmark_overridden(cfg.task_suite_name)()
 
         self._compute_total_num_group_envs()
+        num_tasks_total = self.task_suite.get_num_tasks()
+        self._adaptive_task_sampling = bool(cfg.get("adaptive_task_sampling", False))
+        self._adaptive_temp = float(cfg.get("adaptive_task_sampling_temp", 1.0))
+        self._ema_alpha = float(cfg.get("task_sr_ema_alpha", 0.05))
+        task_sr_override = cfg.get("task_sr_override", None)
+        if task_sr_override is not None:
+            override = np.array(list(task_sr_override), dtype=float)
+            if len(override) != num_tasks_total:
+                raise ValueError(
+                    f"task_sr_override has {len(override)} entries but suite has {num_tasks_total} tasks"
+                )
+            self._task_sr_ema = override
+            self._task_sr_override = True
+        else:
+            self._task_sr_ema = np.full(num_tasks_total, 0.5)
+            self._task_sr_override = False
         self.reset_state_ids_all = self.get_reset_state_ids_all()
         self.update_reset_state_ids()
         self._init_task_and_trial_ids()
@@ -393,7 +409,25 @@ class LiberoEnv(gym.Env):
         else:
             self._valid_reset_state_ids = None
 
+    def _update_task_sr_ema_from_rollout(self):
+        task_successes = {}
+        task_counts = {}
+        for env_idx in range(self.num_envs):
+            tid = int(self.task_ids[env_idx])
+            success = float(self.success_once[env_idx])
+            task_successes[tid] = task_successes.get(tid, 0.0) + success
+            task_counts[tid] = task_counts.get(tid, 0) + 1
+        for tid, total_success in task_successes.items():
+            sr = total_success / task_counts[tid]
+            self._task_sr_ema[tid] = (
+                (1.0 - self._ema_alpha) * self._task_sr_ema[tid]
+                + self._ema_alpha * sr
+            )
+
     def update_reset_state_ids(self):
+        if (not self.cfg.is_eval and self._adaptive_task_sampling
+                and not self._task_sr_override and hasattr(self, "success_once")):
+            self._update_task_sr_ema_from_rollout()
         if self.cfg.is_eval or self.cfg.use_ordered_reset_state_ids:
             reset_state_ids = self._get_ordered_reset_state_ids(self.num_group)
         else:
@@ -407,10 +441,32 @@ class LiberoEnv(gym.Env):
 
     def _get_random_reset_state_ids(self, num_reset_states):
         if self.specific_reset_id is not None:
-            reset_state_ids = self.specific_reset_id * np.ones(
-                (num_reset_states,), dtype=int
+            return self.specific_reset_id * np.ones((num_reset_states,), dtype=int)
+
+        if self._adaptive_task_sampling:
+            valid_tids = (
+                sorted(set(int(t) for t in self.task_id_filter))
+                if self.task_id_filter is not None
+                else list(range(self.task_suite.get_num_tasks()))
             )
-        elif self._valid_reset_state_ids is not None:
+            valid_sr = self._task_sr_ema[valid_tids]
+            mean_sr = valid_sr.mean()
+            advantage = valid_sr - mean_sr
+            logits = -advantage / self._adaptive_temp
+            logits -= logits.max()
+            weights = np.exp(logits)
+            weights /= weights.sum()
+            sampled_tids = self._generator.choice(
+                valid_tids, size=num_reset_states, p=weights
+            )
+            reset_state_ids = []
+            for tid in sampled_tids:
+                start = int(self.cumsum_trial_id_bins[tid - 1]) if tid > 0 else 0
+                end = int(self.cumsum_trial_id_bins[tid])
+                reset_state_ids.append(int(self._generator.integers(start, end)))
+            return np.array(reset_state_ids, dtype=int)
+
+        if self._valid_reset_state_ids is not None:
             indices = self._generator.integers(
                 low=0, high=len(self._valid_reset_state_ids), size=(num_reset_states,)
             )
