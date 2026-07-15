@@ -71,7 +71,32 @@ class WorkerMeta(type):
             @functools.wraps(func)
             def sync_func(*args, **kwargs):
                 try:
-                    return func(*args, **kwargs)
+                    res = func(*args, **kwargs)
+                    if func_name == "__init__":
+                        try:
+                            from omegaconf import DictConfig
+                            cfg = None
+                            for arg in args:
+                                if isinstance(arg, DictConfig):
+                                    cfg = arg
+                                    break
+                            if cfg is None:
+                                for val in kwargs.values():
+                                    if isinstance(val, DictConfig):
+                                        cfg = val
+                                        break
+                            if cfg is not None and cfg.get("trace_server_ip", None) is not None:
+                                from rlinf.utils.tracing import init_tracer
+                                self = args[0]
+                                init_tracer(
+                                    server_ip=cfg.trace_server_ip,
+                                    port=cfg.trace_server_port,
+                                    process_name=f"{self._group_name}_rank{self._rank}",
+                                    thread_name="main"
+                                )
+                        except Exception:
+                            pass
+                    return res
                 except SystemExit:
                     # Catch SystemExit and log the error
                     raise RuntimeError(
