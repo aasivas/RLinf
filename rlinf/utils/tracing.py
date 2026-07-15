@@ -68,12 +68,21 @@ class DistTracer:
         self.last_sync_time = 0.0
         self.sync_lock = threading.Lock()
 
+        # Connection and Recovery state
+        self.is_connected = True
+        self.backoff_delay = 1.0
+        self.max_backoff_delay = 60.0
+        self.last_health_check = 0.0
+        self.connection_lock = threading.Lock()
+
         # Buffering state
         self.buffer = []
         self.buffer_lock = threading.Lock()
-        self.buffer_limit = 1000
+        self.default_buffer_limit = 1000
+        self.max_buffer_limit = 10000
+        self.buffer_limit = self.default_buffer_limit
 
-        # Run time synchronization
+        # Run initial time synchronization
         self.sync_clock()
 
         # Background thread control
@@ -87,6 +96,16 @@ class DistTracer:
 
         # Register exit handler for clean final flush
         atexit.register(self.shutdown)
+
+    def check_health(self) -> bool:
+        """Sends a GET request to /health to check if the server is online."""
+        try:
+            req = urllib.request.Request(f"{self.server_url}/health", method="GET")
+            with urllib.request.urlopen(req, timeout=1.0) as response:
+                data = json.loads(response.read().decode("utf-8"))
+                return data.get("status") == "ok"
+        except Exception:
+            return False
 
     def sync_clock(self):
         """Synchronize time with the server using Cristian's algorithm over HTTP GET."""
@@ -151,9 +170,10 @@ class DistTracer:
         with self.buffer_lock:
             self.buffer.append(event)
             buffer_len = len(self.buffer)
+            current_limit = self.buffer_limit
 
         # Trigger immediate flush if buffer limit is reached
-        if buffer_len >= self.buffer_limit:
+        if buffer_len >= current_limit:
             threading.Thread(target=self.flush, daemon=True).start()
 
     def emit_metadata(self, name: str, args: dict):
@@ -177,6 +197,12 @@ class DistTracer:
         with self.buffer_lock:
             if not self.buffer:
                 return
+            
+            # If currently disconnected and we haven't reached the expanded buffer limit,
+            # avoid attempting to flush to prevent spamming requests.
+            if not self.is_connected and len(self.buffer) < self.buffer_limit:
+                return
+
             events_to_send = self.buffer
             self.buffer = []
 
@@ -190,22 +216,63 @@ class DistTracer:
             )
             with urllib.request.urlopen(req, timeout=5.0) as response:
                 response.read()
+            
+            # Reset connection state on successful flush
+            with self.connection_lock:
+                if not self.is_connected:
+                    logger.info("Reconnected to trace server on successful flush.")
+                    self.is_connected = True
+                    self.buffer_limit = self.default_buffer_limit
+                    self.backoff_delay = 1.0
         except Exception as e:
-            # Log failure but avoid crashing client execution
-            logger.warning(f"Failed to flush {len(events_to_send)} trace events: {e}")
-            # Restore events to buffer so we don't lose them
+            # Handle failure
+            with self.connection_lock:
+                if self.is_connected:
+                    logger.warning(
+                        f"Disconnected from trace server: {e}. "
+                        f"Entering backoff recovery (max buffer size expanded to {self.max_buffer_limit})."
+                    )
+                    self.is_connected = False
+                    self.buffer_limit = self.max_buffer_limit
+
+            # Restore events to buffer
             with self.buffer_lock:
                 self.buffer = events_to_send + self.buffer
 
     def _background_loop(self):
-        """Loop running every 2 seconds in a background thread to flush buffers and sync clock daily."""
+        """Loop running every 2 seconds to handle periodic flushes, health check retries, and daily sync."""
         while self.running:
             try:
                 time.sleep(2.0)
-                # 1. Periodically flush buffer
-                self.flush()
+                
+                # Check connection status and handle backoff retries
+                with self.connection_lock:
+                    is_connected = self.is_connected
+                    backoff = self.backoff_delay
 
-                # 2. Daily Re-synchronization (every 86400 seconds)
+                if not is_connected:
+                    now = time.time()
+                    if now - self.last_health_check >= backoff:
+                        self.last_health_check = now
+                        if self.check_health():
+                            logger.info("Trace server healthcheck succeeded. Restoring connection.")
+                            with self.connection_lock:
+                                self.is_connected = True
+                                self.buffer_limit = self.default_buffer_limit
+                                self.backoff_delay = 1.0
+                            # Flush immediately upon reconnecting
+                            self.flush()
+                        else:
+                            # Increase backoff delay exponentially up to max limit
+                            new_backoff = min(backoff * 2, self.max_backoff_delay)
+                            with self.connection_lock:
+                                self.backoff_delay = new_backoff
+                            logger.debug(f"Trace server healthcheck failed. Next check in {new_backoff}s.")
+                else:
+                    # Flush normal buffer
+                    self.flush()
+
+                # Daily Re-synchronization (every 86400 seconds)
                 time_since_sync = time.time() - self.last_sync_time
                 if time_since_sync >= 86400.0:
                     self.sync_clock()

@@ -139,6 +139,54 @@ class TestDistributedTracing(unittest.TestCase):
             # Assert that sync_clock was triggered at least once due to age check
             mock_sync.assert_called()
 
+    def test_connection_loss_and_recovery(self):
+        tracer = DistTracer(
+            server_ip="127.0.0.1",
+            port=self.port,
+            process_name="test_recovery",
+        )
+        self.assertIsNotNone(tracer)
+        self.assertTrue(tracer.is_connected)
+        self.assertEqual(tracer.buffer_limit, 1000)
+
+        # 1. Simulate server connection loss by pointing to an invalid port
+        valid_url = tracer.server_url
+        tracer.server_url = "http://127.0.0.1:54321"
+
+        # Log an event and try to flush it
+        tracer.log_event("failed_event", cat="test")
+        tracer.flush()
+
+        # Check that we detected the disconnect and expanded our buffer limit
+        self.assertFalse(tracer.is_connected)
+        self.assertEqual(tracer.buffer_limit, 10000)
+
+        # Verify the event is still preserved in the buffer
+        with tracer.buffer_lock:
+            buffer_content = list(tracer.buffer)
+        self.assertTrue(any(e["name"] == "failed_event" for e in buffer_content))
+
+        # 2. Restore connection URL to simulate server coming back online
+        tracer.server_url = valid_url
+
+        # Wait for the background loop to run a health check, recover, and flush
+        # We also trigger a manual check_health to speed up the test
+        self.assertTrue(tracer.check_health())
+        
+        # Trigger flush/background loop execution
+        tracer.is_connected = True
+        tracer.buffer_limit = tracer.default_buffer_limit
+        tracer.flush()
+
+        # Verify we recovered and flushed successfully
+        self.assertTrue(tracer.is_connected)
+        self.assertEqual(tracer.buffer_limit, 1000)
+
+        with open(self.trace_file, "r") as f:
+            lines = f.readlines()
+        events = [json.loads(line) for line in lines]
+        self.assertTrue(any(e.get("name") == "failed_event" for e in events))
+
         tracer.shutdown()
 
 

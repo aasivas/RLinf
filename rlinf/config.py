@@ -1346,25 +1346,6 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
             cfg.trace_server_ip = TRACE_SERVER_IP
             cfg.trace_server_port = TRACE_SERVER_PORT
             
-            trace_file = os.path.join(
-                cfg.runner.logger.log_path,
-                cfg.runner.logger.experiment_name,
-                "trace_events.jsonl"
-            )
-            from rlinf.utils.trace_server import start_server
-            import threading
-            import time
-            
-            server_thread = threading.Thread(
-                target=start_server,
-                kwargs={"host": "0.0.0.0", "port": TRACE_SERVER_PORT, "output_file": trace_file},
-                daemon=True
-            )
-            server_thread.start()
-            
-            # Give server a moment to bind and start
-            time.sleep(0.2)
-            
             # Initialize driver tracer
             init_tracer(
                 server_ip=TRACE_SERVER_IP,

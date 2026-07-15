@@ -13,108 +13,69 @@
 # limitations under the License.
 
 import argparse
+import asyncio
 import json
 import logging
 import os
-import sys
-import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from fastapi import FastAPI, HTTPException, Request
+import uvicorn
 
 logger = logging.getLogger("rlinf.trace_server")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+app = FastAPI(title="RLinf Trace Server")
+trace_file_path = "trace_events.jsonl"
+file_lock = asyncio.Lock()
 
-class TraceHTTPRequestHandler(BaseHTTPRequestHandler):
-    # Class-level lock to ensure thread-safe appends to the JSONL trace file
-    file_lock = threading.Lock()
-    trace_file_path = "trace_events.jsonl"
 
-    def log_message(self, format, *args):
-        # Prevent default http.server logging to stdout to keep logs clean
-        pass
+@app.get("/sync")
+async def sync_time():
+    """Returns the current server timestamp in microseconds (UTC+0)."""
+    server_time_us = time.time_ns() // 1000
+    return {"server_time_us": server_time_us}
 
-    def do_GET(self):
-        if self.path == "/sync":
-            # Returns server time in microseconds (UTC+0 Unix epoch time)
-            server_time_us = time.time_ns() // 1000
-            response = {"server_time_us": server_time_us}
-            self._send_json(response)
-        elif self.path == "/status" or self.path == "/health":
-            self._send_json({"status": "ok"})
-        else:
-            self._send_error_response(404, "Not Found")
 
-    def do_POST(self):
-        if self.path == "/trace":
-            content_length = int(self.headers.get("Content-Length", 0))
-            if content_length == 0:
-                self._send_error_response(400, "Empty Body")
-                return
+@app.get("/health")
+@app.get("/status")
+async def health():
+    """Returns a simple healthcheck status."""
+    return {"status": "ok"}
 
-            try:
-                post_data = self.rfile.read(content_length)
-                events = json.loads(post_data.decode("utf-8"))
-            except Exception as e:
-                self._send_error_response(400, f"Invalid JSON: {str(e)}")
-                return
 
-            if not isinstance(events, list):
-                self._send_error_response(
-                    400, "Expected a JSON list of trace events"
-                )
-                return
+@app.post("/trace")
+async def receive_trace(request: Request):
+    """Receives trace events and appends them to a file in JSONL format."""
+    try:
+        events = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
 
-            # Append to file thread-safely
-            try:
-                with self.file_lock:
-                    # Ensure directory exists
-                    dir_name = os.path.dirname(self.trace_file_path)
-                    if dir_name:
-                        os.makedirs(dir_name, exist_ok=True)
-                    
-                    with open(self.trace_file_path, "a") as f:
-                        for event in events:
-                            f.write(json.dumps(event) + "\n")
-            except Exception as e:
-                logger.error(f"Failed to write to file: {e}")
-                self._send_error_response(500, "Internal Server Error")
-                return
+    if not isinstance(events, list):
+        raise HTTPException(status_code=400, detail="Expected a JSON list of trace events")
 
-            self._send_json({"status": "success", "count": len(events)})
-        else:
-            self._send_error_response(404, "Not Found")
-
-    def _send_json(self, data, status_code=200):
+    async with file_lock:
         try:
-            response_bytes = json.dumps(data).encode("utf-8")
-            self.send_response(status_code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(response_bytes)))
-            self.end_headers()
-            self.wfile.write(response_bytes)
+            dir_name = os.path.dirname(trace_file_path)
+            if dir_name:
+                os.makedirs(dir_name, exist_ok=True)
+            with open(trace_file_path, "a") as f:
+                for event in events:
+                    f.write(json.dumps(event) + "\n")
         except Exception as e:
-            logger.error(f"Error sending response: {e}")
+            logger.error(f"Failed to write to file: {e}")
+            raise HTTPException(status_code=500, detail="Failed to write trace events to file")
 
-    def _send_error_response(self, status_code, message):
-        self._send_json({"error": message}, status_code=status_code)
+    return {"status": "success", "count": len(events)}
 
 
 def start_server(host: str, port: int, output_file: str):
-    TraceHTTPRequestHandler.trace_file_path = os.path.abspath(output_file)
-    server_address = (host, port)
-    
-    # Initialize the ThreadingHTTPServer to handle concurrency safely
-    httpd = ThreadingHTTPServer(server_address, TraceHTTPRequestHandler)
-    logger.info(f"Starting http trace server on {host}:{port}")
-    logger.info(f"Writing trace events to: {TraceHTTPRequestHandler.trace_file_path}")
-    
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        logger.info("Server shutting down...")
-    finally:
-        httpd.server_close()
+    """Starts the FastAPI server using Uvicorn."""
+    global trace_file_path
+    trace_file_path = os.path.abspath(output_file)
+    logger.info(f"Starting trace server on {host}:{port}")
+    logger.info(f"Writing trace events to: {trace_file_path}")
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":
