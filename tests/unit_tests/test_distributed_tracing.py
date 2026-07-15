@@ -170,13 +170,7 @@ class TestDistributedTracing(unittest.TestCase):
         tracer.server_url = valid_url
 
         # Wait for the background loop to run a health check, recover, and flush
-        # We also trigger a manual check_health to speed up the test
-        self.assertTrue(tracer.check_health())
-        
-        # Trigger flush/background loop execution
-        tracer.is_connected = True
-        tracer.buffer_limit = tracer.default_buffer_limit
-        tracer.flush()
+        time.sleep(2.5)
 
         # Verify we recovered and flushed successfully
         self.assertTrue(tracer.is_connected)
