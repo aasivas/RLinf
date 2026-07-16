@@ -37,8 +37,8 @@ class DummyRolloutWorker(Worker):
             // self.num_action_chunks
         )
 
-        self.rollout_epoch = cfg.algorithm.get("rollout_epoch", 1)
-        self.eval_rollout_epoch = cfg.algorithm.get("eval_rollout_epoch", 1)
+        self.rollout_epoch = cfg.env.train.rollout_epoch
+        self.eval_rollout_epoch = cfg.env.eval.get("rollout_epoch", 1) if "eval" in cfg.env else 1
 
     def init_worker(self):
         return None
