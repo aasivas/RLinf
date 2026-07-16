@@ -16,46 +16,50 @@ import torch
 from omegaconf import DictConfig
 from rlinf.scheduler import Worker, Channel, Cluster
 from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.scheduler.worker.routing import CommMapper
+
 
 class DummyRewardWorker(Worker):
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
         self.placement = HybridComponentPlacement(cfg, Cluster())
-        self.total_num_train_envs = cfg.env.train.total_num_envs
 
     def init_worker(self):
         return None
 
     async def compute_rewards(self, input_channel: Channel, output_channel: Channel):
-        env_world_size = self.placement.get_world_size("env")
-        src_ranks = CommMapper.get_src_ranks(self.total_num_train_envs, env_world_size, self._world_size, self._rank)
-        dst_ranks = CommMapper.get_dst_ranks(self.total_num_train_envs, self._world_size, env_world_size, self._rank)
-
-        local_num_train_envs = sum(size for _, size in src_ranks)
+        env_group_name = self.cfg.env.group_name
+        train_batch_size = (
+            self.cfg.env.train.total_num_envs * self.cfg.env.train.group_size
+        )
+        local_num_train_envs = train_batch_size // self._world_size
         total_last_run_count = 0
-        
+
         while True:
             # Recv input
-            last_run_count = 0
-            for src_rank, expected_size in src_ranks:
-                data = await input_channel.get(
-                    key=CommMapper.build_channel_key(src_rank, self._rank, extra="train_reward_input"),
-                    async_op=True
-                ).async_wait()
-                last_run = data.get("last_run", None)
-                last_run_count += int(last_run.sum().item()) if last_run is not None else 0
-            
+            merged_data = await self.recv_from(
+                group_name=env_group_name,
+                channel=input_channel,
+                tag="train_reward_obs",
+                async_op=True,
+                batch_size=train_batch_size,
+            ).async_wait()
+
+            last_run = merged_data.get("last_run", None)
+            last_run_count = (
+                int(last_run.sum().item()) if last_run is not None else 0
+            )
+
             # Send output (rewards)
-            for dst_rank, size in dst_ranks:
-                rewards = torch.zeros(size)
-                output_channel.put(
-                    rewards,
-                    key=CommMapper.build_channel_key(self._rank, dst_rank, extra="train_reward_output"),
-                    async_op=True
-                )
-            
+            rewards = torch.zeros(merged_data["obs"].shape[0], 1)
+            self.send_to(
+                group_name=env_group_name,
+                channel=output_channel,
+                data=rewards,
+                tag="train_reward_obs",
+                async_op=True,
+            )
+
             total_last_run_count += last_run_count
             if total_last_run_count >= local_num_train_envs:
                 break
