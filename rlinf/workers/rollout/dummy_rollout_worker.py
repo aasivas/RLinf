@@ -49,6 +49,48 @@ class DummyRolloutWorker(Worker):
     def sync_model_from_actor(self):
         return None
 
+    def _split_rollout_result(
+        self, rollout_result: RolloutResult, sizes: list[int]
+    ) -> list[RolloutResult]:
+        def _split_optional_tensor(
+            tensor: torch.Tensor | None,
+        ) -> tuple[torch.Tensor | None, ...]:
+            if tensor is None:
+                return tuple(None for _ in sizes)
+            return tuple(torch.split(tensor, sizes, dim=0))
+
+        split_actions = _split_optional_tensor(rollout_result.actions)
+        split_prev_logprobs = _split_optional_tensor(rollout_result.prev_logprobs)
+        split_prev_values = _split_optional_tensor(rollout_result.prev_values)
+        split_bootstrap_values = _split_optional_tensor(rollout_result.bootstrap_values)
+        split_intervene_flags = _split_optional_tensor(rollout_result.intervene_flags)
+        split_versions = _split_optional_tensor(rollout_result.versions)
+        split_forward_inputs = (
+            [{} for _ in sizes]
+            if not rollout_result.forward_inputs
+            else [
+                {
+                    key: torch.split(value, sizes, dim=0)[idx]
+                    for key, value in rollout_result.forward_inputs.items()
+                    if value is not None
+                }
+                for idx in range(len(sizes))
+            ]
+        )
+
+        return [
+            RolloutResult(
+                actions=split_actions[idx],
+                prev_logprobs=split_prev_logprobs[idx],
+                prev_values=split_prev_values[idx],
+                bootstrap_values=split_bootstrap_values[idx],
+                intervene_flags=split_intervene_flags[idx],
+                forward_inputs=split_forward_inputs[idx],
+                versions=split_versions[idx],
+            )
+            for idx in range(len(sizes))
+        ]
+
     async def generate(self, input_channel: Channel, output_channel: Channel):
         env_group_name = self.cfg.env.group_name
         train_batch_size = self.cfg.env.train.total_num_envs * self.cfg.env.train.group_size
@@ -98,6 +140,7 @@ class DummyRolloutWorker(Worker):
                         route_key=stage_id,
                         async_op=True,
                         batch_size=train_batch_size,
+                        split_fn=self._split_rollout_result,
                     )
 
                 # Recv obs
@@ -129,6 +172,7 @@ class DummyRolloutWorker(Worker):
                     route_key=stage_id,
                     async_op=True,
                     batch_size=train_batch_size,
+                    split_fn=self._split_rollout_result,
                 )
 
     async def evaluate(self, input_channel: Channel, output_channel: Channel):
