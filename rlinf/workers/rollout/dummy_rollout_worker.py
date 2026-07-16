@@ -24,21 +24,23 @@ class DummyRolloutWorker(Worker):
         super().__init__()
         self.cfg = cfg
         self.placement = HybridComponentPlacement(cfg, Cluster())
-
-        self.num_action_chunks = cfg.actor.model.num_action_chunks
-        self.action_dim = cfg.actor.model.action_dim
+        self.num_action_chunks = cfg.actor.model.get("num_action_chunks", 1)
+        self.action_dim = cfg.actor.model.get("action_dim", 1)
 
         self.n_train_chunk_steps = (
-            self.cfg.env.train.max_steps_per_rollout_epoch
-            // self.num_action_chunks
+            self.cfg.env.train.max_steps_per_rollout_epoch // self.num_action_chunks
         )
         self.n_eval_chunk_steps = (
-            self.cfg.env.eval.max_steps_per_rollout_epoch
-            // self.num_action_chunks
+            (self.cfg.env.eval.max_steps_per_rollout_epoch // self.num_action_chunks)
+            if "eval" in self.cfg.env
+            else 0
         )
 
         self.rollout_epoch = cfg.env.train.rollout_epoch
-        self.eval_rollout_epoch = cfg.env.eval.get("rollout_epoch", 1) if "eval" in cfg.env else 1
+        self.eval_rollout_epoch = (
+            cfg.env.eval.get("rollout_epoch", 1) if "eval" in cfg.env else 1
+        )
+        self.env_decoupled_mode = cfg.env.get("decoupled_mode", False)
 
     def init_worker(self):
         return None
@@ -77,7 +79,6 @@ class DummyRolloutWorker(Worker):
                 for idx in range(len(sizes))
             ]
         )
-
         return [
             RolloutResult(
                 actions=split_actions[idx],
@@ -91,77 +92,41 @@ class DummyRolloutWorker(Worker):
             for idx in range(len(sizes))
         ]
 
-    async def generate(self, input_channel: Channel, output_channel: Channel):
+    async def generate_one_epoch(self, input_channel: Channel, output_channel: Channel):
         env_group_name = self.cfg.env.group_name
         stage_num = self.cfg.rollout.pipeline_stage_num
         train_batch_size = self.cfg.env.train.total_num_envs // stage_num
 
-        for _epoch in range(self.rollout_epoch):
-            # Recv bootstrap obs
+        for _ in range(self.n_train_chunk_steps):
             for stage_id in range(stage_num):
                 await self.recv_from(
                     group_name=env_group_name,
                     channel=input_channel,
                     tag="train_rollout_results",
-                    route_key=stage_id,
+                    route_key=stage_id if not self.env_decoupled_mode else None,
                     async_op=True,
                     batch_size=train_batch_size,
                 ).async_wait()
 
-            for _step in range(self.n_train_chunk_steps):
-                # Send rollout results
-                for stage_id in range(stage_num):
-                    actions = torch.randn(
-                        train_batch_size // self._world_size,
-                        self.num_action_chunks,
-                        self.action_dim,
-                    )
-                    rollout_result = RolloutResult(
-                        actions=actions,
-                        forward_inputs={"action": actions},
-                        bootstrap_values=torch.zeros(
-                            train_batch_size // self._world_size, 1
-                        ),
-                        prev_logprobs=torch.zeros(
-                            train_batch_size // self._world_size, self.num_action_chunks
-                        ),
-                        prev_values=torch.zeros(
-                            train_batch_size // self._world_size, self.num_action_chunks
-                        ),
-                        versions=torch.zeros(
-                            train_batch_size // self._world_size, dtype=torch.long
-                        ),
-                    )
-                    self.send_to(
-                        group_name=env_group_name,
-                        channel=output_channel,
-                        data=rollout_result,
-                        tag="train_rollout_results",
-                        route_key=stage_id,
-                        async_op=True,
-                        batch_size=train_batch_size,
-                        split_fn=self._split_rollout_result,
-                    )
-
-                # Recv obs
-                for stage_id in range(stage_num):
-                    await self.recv_from(
-                        group_name=env_group_name,
-                        channel=input_channel,
-                        tag="train_rollout_results",
-                        route_key=stage_id,
-                        async_op=True,
-                        batch_size=train_batch_size,
-                    ).async_wait()
-
-            # Final bootstrap rollout result
-            for stage_id in range(stage_num):
+                actions = torch.randn(
+                    train_batch_size // self._world_size,
+                    self.num_action_chunks,
+                    self.action_dim,
+                )
                 rollout_result = RolloutResult(
+                    actions=actions,
+                    forward_inputs={"action": actions},
                     bootstrap_values=torch.zeros(
                         train_batch_size // self._world_size, 1
                     ),
+                    prev_logprobs=torch.zeros(
+                        train_batch_size // self._world_size, self.num_action_chunks
+                    ),
                     prev_values=torch.zeros(
                         train_batch_size // self._world_size, self.num_action_chunks
+                    ),
+                    versions=torch.zeros(
+                        train_batch_size // self._world_size, dtype=torch.long
                     ),
                 )
                 self.send_to(
@@ -169,58 +134,83 @@ class DummyRolloutWorker(Worker):
                     channel=output_channel,
                     data=rollout_result,
                     tag="train_rollout_results",
-                    route_key=stage_id,
+                    route_key=stage_id if not self.env_decoupled_mode else None,
                     async_op=True,
                     batch_size=train_batch_size,
                     split_fn=self._split_rollout_result,
                 )
 
-    async def evaluate(self, input_channel: Channel, output_channel: Channel):
+        for stage_id in range(stage_num):
+            await self.recv_from(
+                group_name=env_group_name,
+                channel=input_channel,
+                tag="train_rollout_results",
+                route_key=stage_id if not self.env_decoupled_mode else None,
+                async_op=True,
+                batch_size=train_batch_size,
+            ).async_wait()
+
+            rollout_result = RolloutResult(
+                bootstrap_values=torch.zeros(
+                    train_batch_size // self._world_size, 1
+                ),
+                prev_values=torch.zeros(
+                    train_batch_size // self._world_size, self.num_action_chunks
+                ),
+            )
+            self.send_to(
+                group_name=env_group_name,
+                channel=output_channel,
+                data=rollout_result,
+                tag="train_rollout_results",
+                route_key=stage_id if not self.env_decoupled_mode else None,
+                async_op=True,
+                batch_size=train_batch_size,
+                split_fn=self._split_rollout_result,
+            )
+
+    async def generate(self, input_channel: Channel, output_channel: Channel):
+        for _ in range(self.rollout_epoch):
+            await self.generate_one_epoch(input_channel, output_channel)
+
+    async def evaluate_one_epoch(self, input_channel: Channel, output_channel: Channel):
         env_group_name = self.cfg.env.group_name
         stage_num = self.cfg.rollout.pipeline_stage_num
         eval_batch_size = self.cfg.env.eval.total_num_envs // stage_num
 
-        for _epoch in range(self.eval_rollout_epoch):
-            # Recv bootstrap obs
+        for _step in range(self.n_eval_chunk_steps):
             for stage_id in range(stage_num):
                 await self.recv_from(
                     group_name=env_group_name,
                     channel=input_channel,
                     tag="rollout_results",
                     mode="eval",
-                    route_key=stage_id,
+                    route_key=stage_id if not self.env_decoupled_mode else None,
                     async_op=True,
                     batch_size=eval_batch_size,
                 ).async_wait()
 
-            for _step in range(self.n_eval_chunk_steps):
-                # Send actions
-                for stage_id in range(stage_num):
-                    actions = torch.randn(
-                        eval_batch_size // self._world_size,
-                        self.num_action_chunks,
-                        self.action_dim,
-                    )
-                    self.send_to(
-                        group_name=env_group_name,
-                        channel=output_channel,
-                        data=actions,
-                        tag="rollout_results",
-                        mode="eval",
-                        route_key=stage_id,
-                        async_op=True,
-                        batch_size=eval_batch_size,
-                    )
+                actions = torch.randn(
+                    eval_batch_size // self._world_size,
+                    self.num_action_chunks,
+                    self.action_dim,
+                )
+                self.send_to(
+                    group_name=env_group_name,
+                    channel=output_channel,
+                    data=actions,
+                    tag="rollout_results",
+                    mode="eval",
+                    route_key=stage_id if not self.env_decoupled_mode else None,
+                    async_op=True,
+                    batch_size=eval_batch_size,
+                )
 
-                is_last_step = _step == self.n_eval_chunk_steps - 1
-                if not is_last_step or self.cfg.env.eval.auto_reset:
-                    for stage_id in range(stage_num):
-                        await self.recv_from(
-                            group_name=env_group_name,
-                            channel=input_channel,
-                            tag="rollout_results",
-                            mode="eval",
-                            route_key=stage_id,
-                            async_op=True,
-                            batch_size=eval_batch_size,
-                        ).async_wait()
+    async def evaluate(self, input_channel: Channel, output_channel: Channel):
+        if self.env_decoupled_mode:
+            raise NotImplementedError(
+                "DummyRolloutWorker does not support eval decoupled mode yet"
+            )
+        else:
+            for _ in range(self.eval_rollout_epoch):
+                await self.evaluate_one_epoch(input_channel, output_channel)
