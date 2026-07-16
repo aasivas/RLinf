@@ -18,10 +18,14 @@ from collections import defaultdict
 from typing import Any
 
 import numpy as np
+import ray
 import torch
 from omegaconf import DictConfig, OmegaConf
 
+from rlinf.utils.tracing import trace_func
+
 from rlinf.algorithms.registry import calculate_adv_and_returns
+from rlinf.algorithms.rewards.history_reward_assigner import HistoryRewardAssigner
 from rlinf.algorithms.rlt.transition import update_rlt_transitions
 from rlinf.data.embodied_io_struct import (
     ChunkStepResult,
@@ -31,6 +35,10 @@ from rlinf.data.embodied_io_struct import (
     RolloutResult,
     Trajectory,
     convert_trajectories_to_batch,
+)
+from rlinf.data.lerobot_io_struct import (
+    Episode as LerobotEpisode,
+    RolloutResult as EmbodiedLerobotRolloutResult,
 )
 from rlinf.envs import get_env_cls
 from rlinf.envs.action_utils import prepare_actions
@@ -432,6 +440,7 @@ class EnvWorker(Worker):
                     get_env_attr(self.eval_env_list[i], "offload")()
 
     @Worker.timer("env_interact_step")
+    @trace_func(cat="env")
     def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int
     ) -> tuple[EnvOutput, dict[str, Any], dict[str, Any]]:
@@ -863,6 +872,7 @@ class EnvWorker(Worker):
                 rollout_rewards[-reward_assign_step][env_id] += reward[env_id]
 
     @Worker.timer("env/bootstrap_step")
+    @trace_func(cat="env")
     def bootstrap_step(self) -> list[EnvOutput]:
         def get_zero_dones() -> torch.Tensor:
             return (

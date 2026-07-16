@@ -108,11 +108,15 @@ class DummyRolloutWorker(Worker):
                     batch_size=train_batch_size,
                 ).async_wait()
 
-                actions = torch.randn(
-                    train_batch_size // self._world_size,
-                    self.num_action_chunks,
-                    self.action_dim,
-                )
+                from rlinf.utils.tracing import trace_span
+                import asyncio
+                with trace_span("dummy_action_generation", "rollout"):
+                    await asyncio.sleep(0.5)
+                    actions = torch.randn(
+                        train_batch_size // self._world_size,
+                        self.num_action_chunks,
+                        self.action_dim,
+                    )
                 rollout_result = RolloutResult(
                     actions=actions,
                     forward_inputs={"action": actions},

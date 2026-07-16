@@ -54,4 +54,8 @@ class DummyActorWorker(Worker):
         return {"dummy_adv": 0.0}
 
     def run_training(self):
-        return {"dummy_loss": 0.0}
+        import time
+        from rlinf.utils.tracing import trace_span
+        with trace_span("dummy_train", "actor"):
+            time.sleep(0.5)
+            return {"dummy_loss": 0.0}
