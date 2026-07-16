@@ -15,7 +15,7 @@
 import torch
 from omegaconf import DictConfig
 from rlinf.scheduler import Worker, Channel, Cluster
-from rlinf.utils.comm_mapping import CommMapper
+from rlinf.scheduler.worker.routing import CommMapper
 from rlinf.data.embodied_io_struct import RolloutResult
 from rlinf.utils.placement import HybridComponentPlacement
 

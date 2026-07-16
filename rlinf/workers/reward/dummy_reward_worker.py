@@ -16,7 +16,7 @@ import torch
 from omegaconf import DictConfig
 from rlinf.scheduler import Worker, Channel, Cluster
 from rlinf.utils.placement import HybridComponentPlacement
-from rlinf.utils.comm_mapping import CommMapper
+from rlinf.scheduler.worker.routing import CommMapper
 
 class DummyRewardWorker(Worker):
     def __init__(self, cfg: DictConfig):
