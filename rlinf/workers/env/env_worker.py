@@ -25,7 +25,6 @@ from omegaconf import DictConfig, OmegaConf
 from rlinf.utils.tracing import trace_func
 
 from rlinf.algorithms.registry import calculate_adv_and_returns
-from rlinf.algorithms.rewards.history_reward_assigner import HistoryRewardAssigner
 from rlinf.algorithms.rlt.transition import update_rlt_transitions
 from rlinf.data.embodied_io_struct import (
     ChunkStepResult,
