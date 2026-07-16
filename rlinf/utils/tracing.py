@@ -59,8 +59,15 @@ class DistTracer:
         self.port = port
         self.server_url = f"http://{server_ip}:{port}"
         
+        import socket
+        try:
+            import ray
+            ip_addr = ray.util.get_node_ip_address()
+        except Exception:
+            ip_addr = socket.gethostbyname(socket.gethostname())
+        hostname = socket.gethostname()
         # Identity labels for Chrome Trace representation
-        self.pid = process_name if process_name is not None else str(os.getpid())
+        self.pid = f"{process_name}@{hostname}({ip_addr})" if process_name is not None else f"{os.getpid()}@{hostname}({ip_addr})"
         self.tid = thread_name if thread_name is not None else str(threading.get_ident())
 
         # Synchronization state
