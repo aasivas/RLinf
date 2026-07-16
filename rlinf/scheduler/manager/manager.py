@@ -97,7 +97,16 @@ class Manager:
     MANAGER_NAME = ""
     proxy: ManagerProxy = None
     PID = None
-    ENV_LIST = ["RAY_ADDRESS", "CLUSTER_NAMESPACE"]
+    ENV_LIST = [
+        "RAY_ADDRESS",
+        "CLUSTER_NAMESPACE",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    ]
 
     def __new__(cls, *args, **kwargs):
         """Sync namespace before any subclass-specific ``__init__`` runs."""
