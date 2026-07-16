@@ -35,10 +35,6 @@ from rlinf.data.embodied_io_struct import (
     Trajectory,
     convert_trajectories_to_batch,
 )
-from rlinf.data.lerobot_io_struct import (
-    Episode as LerobotEpisode,
-    RolloutResult as EmbodiedLerobotRolloutResult,
-)
 from rlinf.envs import get_env_cls
 from rlinf.envs.action_utils import prepare_actions
 from rlinf.envs.utils import get_env_attr
