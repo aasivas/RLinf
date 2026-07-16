@@ -29,9 +29,8 @@ class DummyRewardWorker(Worker):
 
     async def compute_rewards(self, input_channel: Channel, output_channel: Channel):
         env_group_name = self.cfg.env.group_name
-        train_batch_size = (
-            self.cfg.env.train.total_num_envs * self.cfg.env.train.group_size
-        )
+        stage_num = self.cfg.rollout.pipeline_stage_num
+        train_batch_size = self.cfg.env.train.total_num_envs // stage_num
         local_num_train_envs = train_batch_size // self._world_size
         total_last_run_count = 0
 

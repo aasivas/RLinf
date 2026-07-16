@@ -93,8 +93,8 @@ class DummyRolloutWorker(Worker):
 
     async def generate(self, input_channel: Channel, output_channel: Channel):
         env_group_name = self.cfg.env.group_name
-        train_batch_size = self.cfg.env.train.total_num_envs * self.cfg.env.train.group_size
         stage_num = self.cfg.rollout.pipeline_stage_num
+        train_batch_size = self.cfg.env.train.total_num_envs // stage_num
 
         for _epoch in range(self.rollout_epoch):
             # Recv bootstrap obs
@@ -177,8 +177,8 @@ class DummyRolloutWorker(Worker):
 
     async def evaluate(self, input_channel: Channel, output_channel: Channel):
         env_group_name = self.cfg.env.group_name
-        eval_batch_size = self.cfg.env.eval.total_num_envs * self.cfg.env.eval.group_size
         stage_num = self.cfg.rollout.pipeline_stage_num
+        eval_batch_size = self.cfg.env.eval.total_num_envs // stage_num
 
         for _epoch in range(self.eval_rollout_epoch):
             # Recv bootstrap obs
