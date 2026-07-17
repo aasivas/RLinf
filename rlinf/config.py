@@ -1339,6 +1339,23 @@ def validate_cfg(cfg: DictConfig) -> DictConfig:
             cfg.runner.per_worker_log_path = os.path.join(
                 cfg.runner.logger.log_path, "worker_logs"
             )
+        
+        # Distributed Tracing Configuration
+        from rlinf.utils.tracing import TRACE_SERVER_IP, TRACE_SERVER_PORT, init_tracer
+        if TRACE_SERVER_IP is not None:
+            cfg.trace_server_ip = TRACE_SERVER_IP
+            cfg.trace_server_port = TRACE_SERVER_PORT
+            
+            # Initialize driver tracer
+            init_tracer(
+                server_ip=TRACE_SERVER_IP,
+                port=TRACE_SERVER_PORT,
+                process_name="driver",
+                thread_name="main"
+            )
+        else:
+            cfg.trace_server_ip = None
+            cfg.trace_server_port = None
         profiling_cfg = cfg.cluster.get("profiling", None)
         if profiling_cfg is not None and bool(profiling_cfg.get("enabled", True)):
             if not profiling_cfg.get("output_dir", None):

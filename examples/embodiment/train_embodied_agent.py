@@ -45,7 +45,11 @@ def main(cfg) -> None:
     actor_placement = component_placement.get_strategy("actor")
     use_training_pipeline = bool(cfg.runner.get("use_training_pipeline", False))
 
-    if cfg.algorithm.loss_type == "embodied_sac":
+    if cfg.algorithm.loss_type == "dummy":
+        from rlinf.workers.actor.dummy_actor_worker import DummyActorWorker
+
+        actor_worker_cls = DummyActorWorker
+    elif cfg.algorithm.loss_type == "embodied_sac":
         if use_training_pipeline:
             raise ValueError(
                 "runner.use_training_pipeline=True is not supported for embodied_sac."
@@ -97,7 +101,13 @@ def main(cfg) -> None:
 
     # Create rollout worker group
     rollout_placement = component_placement.get_strategy("rollout")
-    rollout_group = MultiStepRolloutWorker.create_group(cfg).launch(
+    if cfg.algorithm.loss_type == "dummy":
+        from rlinf.workers.rollout.dummy_rollout_worker import DummyRolloutWorker
+
+        rollout_worker_cls = DummyRolloutWorker
+    else:
+        rollout_worker_cls = MultiStepRolloutWorker
+    rollout_group = rollout_worker_cls.create_group(cfg).launch(
         cluster, name=cfg.rollout.group_name, placement_strategy=rollout_placement
     )
 
@@ -113,7 +123,13 @@ def main(cfg) -> None:
     ).get("standalone_realworld", False):
         # Create reward worker group
         reward_placement = component_placement.get_strategy("reward")
-        reward_group = EmbodiedRewardWorker.create_group(cfg).launch(
+        if cfg.algorithm.loss_type == "dummy":
+            from rlinf.workers.reward.dummy_reward_worker import DummyRewardWorker
+
+            reward_worker_cls = DummyRewardWorker
+        else:
+            reward_worker_cls = EmbodiedRewardWorker
+        reward_group = reward_worker_cls.create_group(cfg).launch(
             cluster, name=cfg.reward.group_name, placement_strategy=reward_placement
         )
 

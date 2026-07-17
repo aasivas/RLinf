@@ -12,13 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from rlinf.algorithms.rewards.code import CodeRewardOffline
-from rlinf.algorithms.rewards.math import MathReward
-from rlinf.algorithms.rewards.rstar2 import Rstar2Reward
-from rlinf.algorithms.rewards.searchr1 import SearchR1Reward
-from rlinf.algorithms.rewards.vqa import VQAReward
-
-
 def register_reward(name: str, reward_class: type):
     assert name not in reward_registry, f"Reward {name} already registered"
     reward_registry[name] = reward_class
@@ -26,13 +19,20 @@ def register_reward(name: str, reward_class: type):
 
 def get_rule_based_reward_class(name: str):
     assert name in reward_registry, f"Reward {name} not found"
-    return reward_registry[name]
+    val = reward_registry[name]
+    if isinstance(val, str):
+        import importlib
+        module_path, class_name = val.rsplit(".", 1)
+        module = importlib.import_module(module_path)
+        val = getattr(module, class_name)
+        reward_registry[name] = val
+    return val
 
 
-reward_registry = {}
-
-register_reward("math", MathReward)
-register_reward("vqa", VQAReward)
-register_reward("code_offline", CodeRewardOffline)
-register_reward("searchr1", SearchR1Reward)
-register_reward("rstar2", Rstar2Reward)
+reward_registry = {
+    "math": "rlinf.algorithms.rewards.math.MathReward",
+    "vqa": "rlinf.algorithms.rewards.vqa.VQAReward",
+    "code_offline": "rlinf.algorithms.rewards.code.CodeRewardOffline",
+    "searchr1": "rlinf.algorithms.rewards.searchr1.SearchR1Reward",
+    "rstar2": "rlinf.algorithms.rewards.rstar2.Rstar2Reward",
+}

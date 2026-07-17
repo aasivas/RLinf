@@ -18,8 +18,11 @@ from collections import defaultdict
 from typing import Any
 
 import numpy as np
+import ray
 import torch
 from omegaconf import DictConfig, OmegaConf
+
+from rlinf.utils.tracing import trace_func
 
 from rlinf.algorithms.registry import calculate_adv_and_returns
 from rlinf.algorithms.rlt.transition import update_rlt_transitions
@@ -432,6 +435,7 @@ class EnvWorker(Worker):
                     get_env_attr(self.eval_env_list[i], "offload")()
 
     @Worker.timer("env_interact_step")
+    @trace_func(cat="env")
     def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int
     ) -> tuple[EnvOutput, dict[str, Any], dict[str, Any]]:
@@ -863,6 +867,7 @@ class EnvWorker(Worker):
                 rollout_rewards[-reward_assign_step][env_id] += reward[env_id]
 
     @Worker.timer("env/bootstrap_step")
+    @trace_func(cat="env")
     def bootstrap_step(self) -> list[EnvOutput]:
         def get_zero_dones() -> torch.Tensor:
             return (
