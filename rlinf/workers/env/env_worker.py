@@ -21,6 +21,8 @@ import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
 
+from rlinf.utils.tracing import trace_func
+
 from rlinf.data.embodied_io_struct import (
     ChunkStepResult,
     EmbodiedRolloutResult,
@@ -391,6 +393,7 @@ class EnvWorker(Worker):
                 self.env_list[i].offload()
 
     @Worker.timer("env_interact_step")
+    @trace_func
     def env_interact_step(
         self, chunk_actions: torch.Tensor, stage_id: int
     ) -> tuple[EnvOutput, dict[str, Any]]:
@@ -898,6 +901,7 @@ class EnvWorker(Worker):
             for reward_assign_step in range(2, reward_assign_length + 1):
                 rollout_rewards[-reward_assign_step][env_id] += reward[env_id]
 
+    @trace_func
     def bootstrap_step(self) -> list[EnvOutput]:
         def get_zero_dones() -> torch.Tensor:
             return (
