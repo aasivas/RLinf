@@ -18,6 +18,7 @@ import functools
 import json
 import logging
 import os
+import random
 import sys
 import threading
 import time
@@ -248,10 +249,12 @@ class DistTracer:
                 self.buffer = events_to_send + self.buffer
 
     def _background_loop(self):
-        """Loop running every 0.1 seconds to handle periodic flushes, health check retries, and daily sync."""
+        """Loop running periodically with jitter to handle flushes, health checks, and daily sync."""
+        base_interval = 1.0
         while self.running:
             try:
-                time.sleep(0.1)
+                # Sleep with +/- 20% jitter to prevent thundering herd
+                time.sleep(base_interval * random.uniform(0.8, 1.2))
                 
                 # Check connection status and handle backoff retries
                 with self.connection_lock:
