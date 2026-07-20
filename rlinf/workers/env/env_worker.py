@@ -1004,6 +1004,7 @@ class EnvWorker(Worker):
             for env_output in env_output_list
         ]
 
+    @trace_func(cat="env")
     async def send_rollout_trajectories(
         self, rollout_result: EmbodiedRolloutResult, channel: Channel
     ):
@@ -1017,6 +1018,7 @@ class EnvWorker(Worker):
         gc.collect()
 
     @Worker.timer("run_interact_once")
+    @trace_func(cat="env")
     async def _run_interact_once(
         self,
         input_channel: Channel,
@@ -1189,6 +1191,7 @@ class EnvWorker(Worker):
         return env_metrics
 
     @Worker.timer("interact")
+    @trace_func(cat="env")
     async def interact(
         self,
         input_channel: Channel,
@@ -1210,6 +1213,7 @@ class EnvWorker(Worker):
 
         return env_metrics
 
+    @trace_func(cat="env")
     def evaluate(self, input_channel: Channel, rollout_channel: Channel):
         eval_metrics = defaultdict(list)
 
