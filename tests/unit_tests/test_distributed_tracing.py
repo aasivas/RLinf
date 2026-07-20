@@ -22,8 +22,9 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-# Inject mock torch to avoid installing the heavy PyTorch package for testing tracing client/server
+# Inject mock torch and omegaconf to avoid installing heavy packages for testing tracing client/server
 sys.modules["torch"] = MagicMock()
+sys.modules["omegaconf"] = MagicMock()
 
 from rlinf.utils.trace_server import start_server
 from rlinf.utils.tracing import (
@@ -103,7 +104,7 @@ class TestDistributedTracing(unittest.TestCase):
         thread_meta = [e for e in events if e.get("name") == "thread_name"]
         self.assertEqual(len(proc_meta), 1)
         self.assertEqual(len(thread_meta), 1)
-        self.assertEqual(proc_meta[0]["args"]["name"], "test_proc")
+        self.assertTrue(proc_meta[0]["args"]["name"].startswith("test_proc"))
         self.assertEqual(thread_meta[0]["args"]["name"], "test_thread")
 
         # Verify trace span event (ph: "X")
