@@ -65,6 +65,7 @@ from rlinf.utils.metric_utils import (
     compute_rollout_metrics,
     compute_split_num,
 )
+from rlinf.utils.tracing import trace_func
 from rlinf.utils.nested_dict_process import (
     put_tensor_device,
     split_dict_to_chunk,
@@ -1026,6 +1027,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
     def get_rollout_state_dict(self) -> dict:
         return self.get_model_state_dict(cpu_offload=False, full_state_dict=False)
 
+    @trace_func(cat="actor")
     async def sync_model_to_rollout(self) -> None:
         if self.enable_offload:
             if not self.is_optimizer_offloaded:
@@ -1173,6 +1175,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
 
         return rollout_batch
 
+    @trace_func(cat="actor")
     def compute_advantages_and_returns(self) -> dict[str, torch.Tensor]:
         """
         Compute the advantages and returns.
@@ -1277,6 +1280,7 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             )
 
     @Worker.timer("run_training")
+    @trace_func(cat="actor")
     def run_training(self) -> None:
         """
         Run the training process using the received rollout batch.

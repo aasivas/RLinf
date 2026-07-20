@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import atexit
 import functools
 import json
@@ -346,12 +347,37 @@ def trace_span(name: str, cat: str = "default", args: dict = None):
         tracer.log_event(name=name, cat=cat, ph="X", ts=start_ts, dur=dur, args=args)
 
 
-def trace_func(cat: str = "default"):
-    """Decorator to trace functions."""
+def trace_func(func_or_cat=None, cat: str = "default"):
+    """Decorator to trace functions (supports @trace_func, @trace_func(), and @trace_func(cat="..."))."""
+    if callable(func_or_cat):
+        func = func_or_cat
+        category = cat
+        if asyncio.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                with trace_span(func.__name__, cat=category):
+                    return await func(*args, **kwargs)
+            return async_wrapper
+        else:
+            @functools.wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                with trace_span(func.__name__, cat=category):
+                    return func(*args, **kwargs)
+            return sync_wrapper
+
+    category = func_or_cat if isinstance(func_or_cat, str) else cat
+
     def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            with trace_span(func.__name__, cat=cat):
-                return func(*args, **kwargs)
-        return wrapper
+        if asyncio.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                with trace_span(func.__name__, cat=category):
+                    return await func(*args, **kwargs)
+            return async_wrapper
+        else:
+            @functools.wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                with trace_span(func.__name__, cat=category):
+                    return func(*args, **kwargs)
+            return sync_wrapper
     return decorator
