@@ -87,6 +87,8 @@ class DistTracer:
         self.buffer = []
         self.buffer_lock = threading.Lock()
         self.default_buffer_limit = 1000
+        if process_name is not None and (process_name.startswith("ActorGroup") or process_name.startswith("driver")):
+            self.default_buffer_limit = 1
         self.max_buffer_limit = 10000
         self.buffer_limit = self.default_buffer_limit
 
@@ -182,7 +184,10 @@ class DistTracer:
 
         # Trigger immediate flush if buffer limit is reached
         if buffer_len >= current_limit:
-            threading.Thread(target=self.flush, daemon=True).start()
+            if self.pid.startswith("ActorGroup") or self.pid.startswith("driver"):
+                self.flush()
+            else:
+                threading.Thread(target=self.flush, daemon=True).start()
 
     def emit_metadata(self, name: str, args: dict):
         """Log a Chrome Trace metadata event (ph: M) to label processes/threads."""
